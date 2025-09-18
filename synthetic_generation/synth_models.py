@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+# pyright: reportMissingImports=false, reportMissingTypeStubs=false
+"""Pydantic models for structured synthetic participant data.
+
+These models define the schema we expect from LLM-based generation and help
+validate and normalize outputs before writing them to disk.
+"""
+
+from typing import List, Optional, Literal
+from pydantic import RootModel
+
+from pydantic import BaseModel, Field
+
+
+Role = Literal[
+    "ML Engineer",
+    "ML Scientist/Researcher",
+    "Software Engineer",
+    "Data Scientist",
+    "Founder",
+    "Management",
+    "Sales and Marketing",
+    "Data Engineer",
+    "Student",
+    "Other",
+]
+
+
+CareerStage = Literal[
+    "Undergrad/New Grad",
+    "Graduate Student",
+    "1–3 Years",
+    "3–5 Years",
+    "5–10 Years",
+    "10+ Years",
+]
+
+
+BuddyPreference = Literal[
+    "No preference",
+    "Buddy in a similar role",
+]
+
+
+class SyntheticParticipant(BaseModel):
+    """Schema for a single synthetic participant record.
+
+    Notes:
+    - Excludes PII fields (email, Slack, LinkedIn, company, original name).
+    - `skills` is normalized to a list of strings.
+    """
+
+    synthetic_name: str = Field(..., min_length=1, description="Fabricated, non-PII name")
+
+    role: Optional[Role] = Field(default=None, description="Participant role")
+    career_stage: Optional[CareerStage] = Field(default=None, description="Career stage")
+    location: Optional[str] = Field(
+        default=None, description="Region or location (non-identifying granularity where possible)"
+    )
+    buddy_preference: Optional[BuddyPreference] = Field(default=None, description="Buddy preference")
+
+    summary: Optional[str] = Field(default=None, description="Short self-summary")
+    skills: List[str] = Field(default_factory=list, description="List of skills/tags (array of strings)")
+    buddy_preferences: Optional[str] = Field(
+        default=None, description="Free-text description of buddy preferences"
+    )
+
+
+class SyntheticParticipants(RootModel[List[SyntheticParticipant]]):
+    pass
+
+
+
