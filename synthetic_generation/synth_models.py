@@ -66,8 +66,9 @@ class SyntheticParticipant(BaseModel):
     )
 
 
-class SyntheticParticipants(RootModel[List[SyntheticParticipant]]):
-    pass
+class SyntheticParticipantsResponse(BaseModel):
+    """Response wrapper for synthetic participants array."""
+    participants: List[SyntheticParticipant] = Field(..., description="List of synthetic participants")
 
 
 

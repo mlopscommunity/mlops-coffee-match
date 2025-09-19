@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-# pyright: reportMissingImports=false, reportMissingTypeStubs=false
-"""Utilities to sample participant records for synthetic data generation.
-
-This module loads the private survey CSV into a pandas DataFrame and samples
-rows without replacement to feed into an LLM for synthetic record creation.
-
-CLI usage example:
-  python synthetic_generation/gen_synthetic_members.py \
-    --csv data/private_mlops_marchvc.csv \
-    --n 5 \
-    --seed 42 \
-    --jsonl-out samples.jsonl
-
-Compare sampled vs. generated locally:
-  python synthetic_generation/gen_synthetic_members.py \
-    --csv data/private_mlops_marchvc.csv \
-    --n 5 \
-    --seed 42 \
-    --compare
-
-Notes:
-- Dependencies are managed with uv (use: `uv add pandas python-dotenv`).
-- Environment variables can be configured via a .env file.
-"""
+"""Sample participant records for synthetic data generation."""
 
 import argparse
 import json
@@ -31,11 +8,19 @@ from typing import Any, Dict, List, Optional, cast
 
 import pandas as pd
 from dotenv import load_dotenv
-from synthetic_generation.synth_models import SyntheticParticipants
+try:
+    from .synth_models import SyntheticParticipantsResponse
+except ImportError:
+    from synth_models import SyntheticParticipantsResponse
 try:
     from openai import OpenAI  # type: ignore
 except Exception:  # pragma: no cover
     OpenAI = None  # type: ignore
+
+try:
+    import anthropic  # type: ignore
+except Exception:  # pragma: no cover
+    anthropic = None  # type: ignore
 
 
 def load_participants(csv_path: Path) -> pd.DataFrame:
@@ -88,39 +73,15 @@ RENAME_MAP: Dict[str, str] = {
     "Keep me registered for all future rounds. (Ask me again next time)": "keep_registered_ask_next_time",
 }
 
-# PII columns in canonical and original forms for safety (not sent to LLM)
-PII_COLUMNS_CANONICAL = {"email", "slack_handle", "linkedin_url", "company", "name"}
-PII_COLUMNS_ORIGINAL = {
-    "Your email address",
-    "What is your Slack Handle?",
-    "Your LinkedIn URL",
-    "Where do you work? ",
-    "Your name ",
-}
-
-# Fields we allow as LLM input examples
+# Fields we allow as LLM input examples (excludes PII)
 ALLOWED_LLM_FIELDS = {
-    "role",
-    "career_stage",
-    "location",
-    "buddy_preference",
-    "summary",
-    "skills",
-    "buddy_preferences",
-    "submission_id",
-    "respondent_id",
+    "role", "career_stage", "location", "buddy_preference", 
+    "summary", "skills", "buddy_preferences", "submission_id", "respondent_id"
 }
 
 
 def apply_column_renames(df: pd.DataFrame, apply: bool) -> pd.DataFrame:
     return df.rename(columns=RENAME_MAP) if apply else df
-
-
-def select_allowed_fields(records: List[Dict[str, Any]], allowed: set[str]) -> List[Dict[str, Any]]:
-    selected: List[Dict[str, Any]] = []
-    for rec in records:
-        selected.append({k: v for k, v in rec.items() if k in allowed})
-    return selected
 
 
 def sample_participants(
@@ -150,20 +111,21 @@ def sample_participants(
     return df.sample(n=num_samples, replace=False, random_state=seed)
 
 
-def records_for_llm(df: pd.DataFrame) -> List[dict[str, Any]]:
-    """Convert a DataFrame to JSON-serializable records for LLM prompting.
-
-    Converts NaN values to None to ensure valid JSON.
+def prepare_llm_records(df: pd.DataFrame, allowed_fields: set[str]) -> List[Dict[str, Any]]:
+    """Prepare DataFrame records for LLM prompting.
+    
+    Filters to allowed fields and converts NaN values to None for JSON serialization.
 
     Args:
         df: Input DataFrame.
+        allowed_fields: Set of column names to include in output.
 
     Returns:
-        List of record dictionaries ready to be serialized as JSON.
+        List of record dictionaries ready for LLM prompting.
     """
-    # Ensure JSON serializable values (convert NaN to None)
-    cleaned = df.where(pd.notnull(df), None)
-    return cast(List[Dict[str, Any]], cleaned.to_dict(orient="records"))
+    # Filter to allowed fields and convert NaN to None
+    filtered_df = df[list(allowed_fields)].where(pd.notnull(df[list(allowed_fields)]), None)
+    return cast(List[Dict[str, Any]], filtered_df.to_dict(orient="records"))
 
 
 def generate_with_openai_min(
@@ -172,132 +134,112 @@ def generate_with_openai_min(
     num_generated: int,
     structured_output: bool = True,
 ) -> List[Dict[str, Any]]:
+    """Generate synthetic participants using OpenAI API."""
     if OpenAI is None:
         raise RuntimeError("openai package not installed. Use 'uv add openai'.")
+    
     client = OpenAI()
-    msgs = [
-        {"role": "system", "content": "Generate anonymized synthetic participants as a JSON array only."},
-        {
-            "role": "user",
-            "content": (
-                "Create {num} records similar to these examples, with new fake names and lightly paraphrased fields.\n"
-                "Do not include emails, Slack handles, LinkedIn, company names.\n"
-                "Respond with ONLY a JSON array of objects.\n\n"
-                f"{json.dumps({"examples": sampled_records}, ensure_ascii=False)}"
-            ).replace("{num}", str(int(num_generated))),
-        },
+    
+    system_prompt = f"""You are an AI assistant that generates synthetic participant data for research purposes.
+
+Your task:
+- Create {num_generated} synthetic participant records based on the provided examples
+- Use completely new fake names and lightly paraphrase other fields
+- Exclude all PII: emails, Slack handles, LinkedIn URLs, company names, real names
+- Maintain the same data structure and field types as the examples
+- Ensure synthetic data is realistic but not identifiable
+- Output as a JSON object with a "participants" array containing the records
+
+Examples to base your generation on:
+{json.dumps(sampled_records, ensure_ascii=False, indent=2)}"""
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Generate {num_generated} synthetic participant records now."},
     ]
+    
     if structured_output:
+        # Use structured output with Pydantic model
         parsed = client.responses.parse(  # type: ignore[attr-defined]
             model=model,
-            input=cast(Any, msgs),
-            text_format=SyntheticParticipants,
+            input=cast(Any, messages),
+            text_format=SyntheticParticipantsResponse,
         )
         items = getattr(parsed, "output_parsed", None)
         if items is None:
             return []
-        seq = getattr(items, "root", items)
-        out: List[Dict[str, Any]] = []
-        for p in seq:
-            if hasattr(p, "model_dump"):
-                out.append(p.model_dump())  # type: ignore[no-any-return]
-            elif isinstance(p, dict):
-                out.append(cast(Dict[str, Any], p))
-        return out
-    resp = client.chat.completions.create(model=model, messages=msgs)  # type: ignore[arg-type]
+        
+        # Extract the participants list and convert to dicts
+        participants = getattr(items, "participants", [])
+        return [p.model_dump() if hasattr(p, "model_dump") else p for p in participants]
+    
+    # Regular completion fallback
+    resp = client.chat.completions.create(model=model, messages=messages)  # type: ignore[arg-type]
     content = resp.choices[0].message.content or "[]"
-    data = json.loads(content)
-    if isinstance(data, list):
-        return cast(List[Dict[str, Any]], data)
-    return []
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict) and "participants" in data:
+            return data["participants"]
+        elif isinstance(data, list):
+            return data
+        return []
+    except json.JSONDecodeError:
+        return []
 
 
-def write_jsonl(records: List[dict[str, Any]], out_path: Path) -> None:
-    """Write records to a JSONL file (one JSON object per line).
+def generate_with_anthropic(
+    sampled_records: List[Dict[str, Any]],
+    model: str,
+    num_generated: int,
+) -> List[Dict[str, Any]]:
+    """Generate synthetic participants using Anthropic API."""
+    if anthropic is None:
+        raise RuntimeError("anthropic package not installed. Use 'uv add anthropic'.")
+    
+    client = anthropic.Anthropic()
+    
+    system_prompt = f"""You are an AI assistant that generates synthetic participant data for research purposes.
 
-    Args:
-        records: List of dictionaries to serialize.
-        out_path: Destination file path.
-    """
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
-        for rec in records:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+Your task:
+- Create {num_generated} synthetic participant records based on the provided examples
+- Use completely new fake names and lightly paraphrase other fields
+- Exclude all PII: emails, Slack handles, LinkedIn URLs, company names, real names
+- Maintain the same data structure and field types as the examples
+- Ensure synthetic data is realistic but not identifiable
+- Output as a JSON object with a "participants" array containing the records
+
+Examples to base your generation on:
+{json.dumps(sampled_records, ensure_ascii=False, indent=2)}"""
+    
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=4000,
+            system=system_prompt,
+            messages=[{"role": "user", "content": f"Generate {num_generated} synthetic participant records now."}]
+        )
+        
+        content = response.content[0].text
+        data = json.loads(content)
+        if isinstance(data, dict) and "participants" in data:
+            return data["participants"]
+        elif isinstance(data, list):
+            return data
+        return []
+    except json.JSONDecodeError:
+        return []
 
 
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
-    parser = argparse.ArgumentParser(
-        description=(
-            "Sample participant records from a CSV to seed LLM-based synthetic generation."
-        )
-    )
-    parser.add_argument(
-        "--csv",
-        type=str,
-        default="data/private_mlops_marchvc.csv",
-        help="Path to the private participants CSV (default: data/private_mlops_marchvc.csv)",
-    )
-    parser.add_argument(
-        "--n",
-        type=int,
-        default=5,
-        help="Number of rows to sample without replacement (default: 5)",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Optional random seed for reproducible sampling",
-    )
-    parser.add_argument(
-        "--jsonl-out",
-        type=str,
-        default=None,
-        help=(
-            "Optional path to write JSONL of sampled records. If omitted, prints JSON to stdout."
-        ),
-    )
-    parser.add_argument(
-        "--compare",
-        action="store_true",
-        help="Print both sampled and locally generated synthetic records in one JSON object",
-    )
-    parser.add_argument(
-        "--generated-n",
-        type=int,
-        default=None,
-        help="Number of synthetic records to generate for comparison (defaults to n)",
-    )
-    parser.add_argument(
-        "--use-openai",
-        action="store_true",
-        help="Use OpenAI API to generate synthetic records instead of local placeholder",
-    )
-    parser.add_argument(
-        "--openai-model",
-        type=str,
-        default="gpt-5-mini",
-        help="OpenAI model to use when --use-openai is set (default: gpt-5-mini)",
-    )
-    parser.add_argument(
-        "--structured-output",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use OpenAI structured output (JSON Schema) for generation (default: true)",
-    )
-    parser.add_argument(
-        "--apply-rename",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Apply canonical column rename mapping after reading CSV (default: true)",
-    )
-    parser.add_argument(
-        "--out-csv",
-        type=str,
-        default=None,
-        help="Optional path to write generated records as a CSV (e.g., data/synthetic_generated.csv)",
-    )
+    parser = argparse.ArgumentParser(description="Generate synthetic participant data from CSV samples.")
+    parser.add_argument("--csv", default="data/private_mlops_marchvc.csv", help="Input CSV path")
+    parser.add_argument("--n", type=int, default=5, help="Number of samples to generate")
+    parser.add_argument("--seed", type=int, help="Random seed for reproducibility")
+    parser.add_argument("--compare", action="store_true", help="Show comparison output")
+    parser.add_argument("--provider", choices=["openai", "anthropic"], required=True, help="LLM provider to use")
+    parser.add_argument("--model", choices=["gpt-5", "gpt-5-mini", "claude-sonnet-4"], required=True, help="Model to use")
+    parser.add_argument("--out", default="synthetic_participants.csv", help="Output CSV path")
     return parser.parse_args()
 
 
@@ -309,53 +251,56 @@ def main() -> None:
     args = parse_args()
     csv_path = Path(args.csv)
     df = load_participants(csv_path)
-    if args.apply_rename:
-        df = apply_column_renames(df, apply=True)
+    df = apply_column_renames(df, apply=True)
 
     sampled_df = sample_participants(df, num_samples=args.n, seed=args.seed)
-    records = records_for_llm(sampled_df)
-    # Strip PII and non-allowed fields before LLM examples
-    records_for_examples = select_allowed_fields(records, ALLOWED_LLM_FIELDS)
+    records_for_examples = prepare_llm_records(sampled_df, ALLOWED_LLM_FIELDS)
 
+    # Generate synthetic data (LLM required)
+    if args.provider == "openai":
+        if OpenAI is None:
+            raise RuntimeError("openai package not available. Install with: uv add openai")
+        
+        if args.model not in ["gpt-5", "gpt-5-mini"]:
+            raise ValueError(f"Model {args.model} not supported for OpenAI provider. Use gpt-5 or gpt-5-mini.")
+        
+        generated = generate_with_openai_min(
+            sampled_records=records_for_examples,
+            model=args.model,
+            num_generated=args.n,
+            structured_output=True,
+        )
+    elif args.provider == "anthropic":
+        if anthropic is None:
+            raise RuntimeError("anthropic package not available. Install with: uv add anthropic")
+        
+        if args.model != "claude-sonnet-4":
+            raise ValueError(f"Model {args.model} not supported for Anthropic provider. Use claude-sonnet-4.")
+        
+        generated = generate_with_anthropic(
+            sampled_records=records_for_examples,
+            model=args.model,
+            num_generated=args.n,
+        )
+    else:
+        raise ValueError(f"Unsupported provider: {args.provider}")
+
+    # Convert to DataFrame and save as CSV
+    df_generated = pd.DataFrame(generated)
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    df_generated.to_csv(args.out, index=False)
+    
     if args.compare:
-        gen_n = args.generated_n if args.generated_n is not None else len(records)
-        if args.use_openai:
-            if OpenAI is None:
-                raise RuntimeError(
-                    "openai package not available. Install with: uv add openai"
-                )
-            allowed_models = {"gpt-5", "gpt-5-mini"}
-            if args.openai_model not in allowed_models:
-                raise ValueError(
-                    f"Unsupported model '{args.openai_model}'. Allowed: {sorted(allowed_models)}"
-                )
-            generated = generate_with_openai_min(
-                sampled_records=records_for_examples,
-                model=args.openai_model,
-                num_generated=gen_n,
-                structured_output=args.structured_output,
-            )
-        else:
-            generated = records
-        if args.out_csv:
-            try:
-                import pandas as _pd
-                _df = _pd.DataFrame(generated)
-                Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
-                _df.to_csv(args.out_csv, index=False)
-            except Exception as _exc:  # noqa: BLE001
-                print(f"Failed to write CSV to {args.out_csv}: {_exc}")
-        combined = {"sampled": records, "generated_count": len(generated)}
-        if not args.out_csv:
-            combined["generated"] = generated
+        # Show comparison in JSON format
+        combined = {
+            "sampled": records_for_examples, 
+            "generated": generated,
+            "generated_count": len(generated)
+        }
         print(json.dumps(combined, ensure_ascii=False, indent=2))
-        return
-
-    if args.jsonl_out:
-        write_jsonl(records, Path(args.jsonl_out))
-        return
-
-    print(json.dumps(records, ensure_ascii=False, indent=2))
+    else:
+        # Just show the generated data
+        print(json.dumps(generated, ensure_ascii=False, indent=2))
 
 
 def generate_with_openai(
@@ -365,7 +310,7 @@ def generate_with_openai(
     seed: Optional[int] = None,
     structured_output: bool = True,
 ) -> List[Dict[str, Any]]:
-    # Backwards-compatible alias to the minimal generator; seed is unused here
+    """Backwards-compatible alias for generate_with_openai_min."""
     return generate_with_openai_min(
         sampled_records=sampled_records,
         model=model,
