@@ -128,7 +128,7 @@ def prepare_llm_records(df: pd.DataFrame, allowed_fields: set[str]) -> List[Dict
     return cast(List[Dict[str, Any]], filtered_df.to_dict(orient="records"))
 
 
-def generate_with_openai_min(
+def generate_with_openai(
     sampled_records: List[Dict[str, Any]],
     model: str,
     num_generated: int,
@@ -264,7 +264,7 @@ def main() -> None:
         if args.model not in ["gpt-5", "gpt-5-mini"]:
             raise ValueError(f"Model {args.model} not supported for OpenAI provider. Use gpt-5 or gpt-5-mini.")
         
-        generated = generate_with_openai_min(
+        generated = generate_with_openai(
             sampled_records=records_for_examples,
             model=args.model,
             num_generated=args.n,
@@ -301,22 +301,6 @@ def main() -> None:
     else:
         # Just show the generated data
         print(json.dumps(generated, ensure_ascii=False, indent=2))
-
-
-def generate_with_openai(
-    sampled_records: List[Dict[str, Any]],
-    model: str,
-    num_generated: int,
-    seed: Optional[int] = None,
-    structured_output: bool = True,
-) -> List[Dict[str, Any]]:
-    """Backwards-compatible alias for generate_with_openai_min."""
-    return generate_with_openai_min(
-        sampled_records=sampled_records,
-        model=model,
-        num_generated=num_generated,
-        structured_output=structured_output,
-    )
 
 
 if __name__ == "__main__":
