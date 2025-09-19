@@ -48,8 +48,11 @@ class SyntheticParticipant(BaseModel):
     Notes:
     - Excludes PII fields (email, Slack, LinkedIn, company, original name).
     - `skills` is normalized to a list of strings.
+    - Includes tracking fields for synthetic data management.
     """
 
+    synthetic_id: str = Field(..., description="Unique identifier for this synthetic participant")
+    source_participant_id: str = Field(..., description="Original respondent_id this was based on")
     synthetic_name: str = Field(..., min_length=1, description="Fabricated, non-PII name")
 
     role: Optional[Role] = Field(default=None, description="Participant role")
