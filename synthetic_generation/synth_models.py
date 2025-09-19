@@ -25,7 +25,6 @@ Role = Literal[
     "Other",
 ]
 
-
 CareerStage = Literal[
     "Undergrad/New Grad",
     "Graduate Student",
@@ -34,7 +33,6 @@ CareerStage = Literal[
     "5–10 Years",
     "10+ Years",
 ]
-
 
 BuddyPreference = Literal[
     "No preference",
@@ -46,7 +44,8 @@ class SyntheticParticipant(BaseModel):
     """Schema for a single synthetic participant record.
 
     Notes:
-    - Excludes PII fields (email, Slack, LinkedIn, company, original name).
+    - Excludes PII fields (email, Slack, LinkedIn, original name).
+    - Includes company and location for context (synthetic versions).
     - `skills` is normalized to a list of strings.
     - Includes tracking fields for synthetic data management.
     """
@@ -60,6 +59,7 @@ class SyntheticParticipant(BaseModel):
     location: Optional[str] = Field(
         default=None, description="Region or location (non-identifying granularity where possible)"
     )
+    company: Optional[str] = Field(default=None, description="Company or organization (synthetic)")
     buddy_preference: Optional[BuddyPreference] = Field(default=None, description="Buddy preference")
 
     summary: Optional[str] = Field(default=None, description="Short self-summary")

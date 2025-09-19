@@ -44,7 +44,7 @@ RENAME_MAP: Dict[str, str] = {
 
 # Fields we allow as LLM input examples (excludes PII)
 ALLOWED_LLM_FIELDS = {
-    "role", "career_stage", "location", "buddy_preference", 
+    "role", "career_stage", "location", "company", "buddy_preference", 
     "summary", "skills", "buddy_preferences", "submission_id", "respondent_id"
 }
 
