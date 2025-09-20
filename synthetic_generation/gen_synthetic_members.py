@@ -45,7 +45,7 @@ RENAME_MAP: Dict[str, str] = {
 # Fields we allow as LLM input examples (excludes PII)
 ALLOWED_LLM_FIELDS = {
     "role", "career_stage", "location", "company", "buddy_preference", 
-    "summary", "skills", "buddy_preferences", "submission_id", "respondent_id"
+    "summary", "skills", "buddy_preferences"
 }
 
 
@@ -61,7 +61,7 @@ def sample_participants(df: pd.DataFrame, num_samples: int) -> pd.DataFrame:
 def prepare_llm_records(df: pd.DataFrame, allowed_fields: set[str]) -> List[Dict[str, Any]]:
     """Prepare DataFrame records for LLM prompting."""
     filtered_df = df[list(allowed_fields)].where(pd.notnull(df[list(allowed_fields)]), None)
-    return filtered_df.to_dict(orient="records")
+    return filtered_df.to_dict(orient="records")  # type: ignore
 
 
 def generate_synthetic_id() -> str:
@@ -97,27 +97,46 @@ def add_synthetic_metadata(records: List[Dict[str, Any]], source_ids: List[str])
 
 def generate_synthetic(records: List[Dict[str, Any]], source_ids: List[str], num_generated: int, provider: str, model: str) -> List[Dict[str, Any]]:
     """Generate synthetic participants using specified provider and model."""
-    prompt = f"""Generate {num_generated} synthetic participant records based on these examples. 
-Use fake names and paraphrase other fields. Exclude PII. Output as JSON with "participants" array.
+    prompt = f"""You are an expert synthetic data generator for a global MLOps community with a wide range of members, especially from the US and Europe. Your task is to create {num_generated} realistic, non-identifiable participant profiles based on the provided examples.
 
-Examples: {json.dumps(records, ensure_ascii=False, indent=2)}"""
+**Core Instructions:**
+
+1.  **Output Format**: Respond with a single JSON object with a root key `"participants"`. The value should be a list of synthetic participant records.
+2.  **Generate Fabricated PII**:
+    *   Create a `synthetic_name` field with a realistic but fake name.
+    *   Create a plausible but fake `company` name.
+    *   Do NOT include any other PII like emails, Slack handles, or LinkedIn URLs.
+3.  **Paraphrase and Generalize Content**:
+    *   For fields like `summary`, `skills`, and `buddy_preferences`, paraphrase the content from the examples to sound natural and human-like while removing identifying details.
+    *   For `location`, use a general region (e.g., "West Coast, USA", "Western Europe") to reflect the global nature of the community.
+    *   For `skills`, ensure the output is a list of strings.
+4.  **Maintain Structure**:
+    *   For categorical fields like `role`, `career_stage`, and `buddy_preference`, use the values from the examples.
+
+**Goal**: The final dataset should feel authentic and be suitable for training a recommendation model for a diverse, global MLOps community. It must contain absolutely no real user data.
+
+**Examples to base your generation on:**
+
+{json.dumps(records, ensure_ascii=False, indent=2)}
+"""
     
+    content = ""
     if provider == "openai":
         client = OpenAI()
-        response = client.chat.completions.create(
+        openai_response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}]
         )
-        content = response.choices[0].message.content or "[]"
+        content = openai_response.choices[0].message.content or "[]"
     elif provider == "anthropic":
         import anthropic
         client = anthropic.Anthropic()
-        response = client.messages.create(
+        anthropic_response = client.messages.create(
             model=model,
-            max_tokens=6000,
+            max_tokens=4096,
             messages=[{"role": "user", "content": prompt}]
         )
-        content = response.content[0].text
+        content = anthropic_response.content[0].text
     else:
         raise ValueError(f"Unsupported provider: {provider}")
     
