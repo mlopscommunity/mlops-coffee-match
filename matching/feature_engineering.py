@@ -238,7 +238,7 @@ if __name__ == "__main__":
 
         project_root = Path(__file__).resolve().parents[1]
         csv_path = (
-            project_root / "data_examples" / "synthetic_participants_20250922_145330.csv"
+            project_root / "data_examples" / "synthetic_participants_20250922_151750.csv"
         )
         df = pd.read_csv(csv_path)
 
@@ -273,7 +273,7 @@ if __name__ == "__main__":
 
         # Save the featured DataFrame to a new CSV
         output_filename = f"{csv_path.stem}_featured.csv"
-        output_path = project_root / "data" / output_filename
+        output_path = project_root / "data_examples" / output_filename
         featured_df.to_csv(output_path, index=False)
         print(f"\nSuccessfully saved featured data to:\n{output_path}")
 

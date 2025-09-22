@@ -110,7 +110,6 @@ def generate_synthetic(records: List[Dict[str, Any]], source_ids: List[str], num
 3.  **Paraphrase and Generalize Content**:
     *   For fields like `summary`, `skills`, and `buddy_preferences`, paraphrase the content from the examples to sound natural and human-like while removing identifying details.
     *   For `location`, can be any level of description as this is a free text field and is a little ambiguous.
-    *   For `skills`, ensure the output is a list of strings.
 4.  **Maintain Structure**:
     *   For categorical fields like `role`, `career_stage`, and `buddy_preference`, use the values from the examples.
 
