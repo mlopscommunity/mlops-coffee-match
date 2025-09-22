@@ -57,13 +57,13 @@ class SyntheticParticipant(BaseModel):
     role: Optional[Role] = Field(default=None, description="Participant role")
     career_stage: Optional[CareerStage] = Field(default=None, description="Career stage")
     location: Optional[str] = Field(
-        default=None, description="Region or location (non-identifying granularity where possible)"
+        default=None, description="Any level description of their location, city, country, region, etc."
     )
     company: Optional[str] = Field(default=None, description="Company or organization (synthetic)")
     buddy_preference: Optional[BuddyPreference] = Field(default=None, description="Buddy preference")
 
     summary: Optional[str] = Field(default=None, description="Short self-summary")
-    skills: List[str] = Field(default_factory=list, description="List of skills/tags (array of strings)")
+    skills: Optional[str] = Field(default=None, description="Free written list of skills/tags, can be list or free text/speakable text")
     buddy_preferences: Optional[str] = Field(
         default=None, description="Free-text description of buddy preferences"
     )

@@ -139,6 +139,8 @@ def embed_personal_summary(df: pd.DataFrame, batch_size: int = 100) -> pd.Series
           .str.replace(r"\s+", " ", regex=True)
           .str.strip()
     )
+    # Replace empty strings to avoid API error
+    combined[combined == ""] = " "
 
     texts = combined.tolist()
     embeddings: List[Any] = [None] * len(texts)
@@ -170,6 +172,8 @@ def embed_buddy_preferences(df: pd.DataFrame, batch_size: int = 100) -> pd.Serie
           .str.replace(r"\s+", " ", regex=True)
           .str.strip()
     )
+    # Replace empty strings to avoid API error
+    texts_series[texts_series == ""] = " "
 
     texts = texts_series.tolist()
     embeddings: List[Any] = [None] * len(texts)
@@ -184,20 +188,39 @@ def embed_buddy_preferences(df: pd.DataFrame, batch_size: int = 100) -> pd.Serie
     return pd.Series(embeddings, index=idx, name="buddy_preferences_embedding")
 
 
-def prepare_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
+def prepare_feature_columns(
+    df: pd.DataFrame, model: str = "gpt-5-mini", batch_size: int = 20
+) -> pd.DataFrame:
     """
     Produce feature columns per plan:
       - profile_embedding: from combined profile text (summary + skills + role + company)
       - preference_embedding: from buddy_preferences
+      - regional_location: normalized from location
     Returns a new DataFrame with added columns.
     """
+    print("Starting feature preparation...")
     out = df.copy()
-    out["profile_embedding"] = embed_personal_summary(out)
+
+    print("Generating profile embeddings...")
+    out["profile_embedding"] = embed_personal_summary(out, batch_size=batch_size)
+
     if "buddy_preferences" in out.columns:
-        out["preference_embedding"] = embed_buddy_preferences(out)
+        print("Generating buddy preference embeddings...")
+        out["preference_embedding"] = embed_buddy_preferences(out, batch_size=batch_size)
     else:
         out["preference_embedding"] = pd.Series([None] * len(out), index=out.index)
+
+    if "location" in out.columns:
+        print("Normalizing locations...")
+        out["regional_location"] = normalize_location(
+            df=out, model=model, location="location", batch_size=batch_size
+        )
+    else:
+        out["regional_location"] = pd.Series([None] * len(out), index=out.index)
+
+    print("Feature preparation complete.")
     return out
+
 
 if __name__ == "__main__":
     import os
@@ -214,31 +237,45 @@ if __name__ == "__main__":
             )
 
         project_root = Path(__file__).resolve().parents[1]
-        csv_path = project_root / "data" / "synthetic_participants_20250919_120846.csv"
+        csv_path = (
+            project_root / "data_examples" / "synthetic_participants_20250922_145330.csv"
+        )
         df = pd.read_csv(csv_path)
-        
-        # Location normalization test (commented out)
-        # model = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
-        # batch_size = 20
-        # regional_series = normalize_location(
-        #     df=df,
-        #     model=model,
-        #     location="location",
-        #     batch_size=batch_size,
-        # )
-        # df["regional_location"] = regional_series
-        # print(df[["location", "regional_location"]].head(15).to_string(index=False))
 
-        # Embeddings tests on a small sample
-        sample = df.head(5)
+        # Prepare features on the full dataframe
+        print(f"\nProcessing {len(df)} rows from {csv_path.name}...")
+        df_to_process = df.copy()
 
-        emb_summary = embed_personal_summary(sample, batch_size=20)
-        print(f"Summary embeddings: {len(emb_summary)} rows. First len: {len(emb_summary.iloc[0])}")
-        print("First summary vec (8 dims):", emb_summary.iloc[0][:8])
+        model = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
 
-        if "buddy_preferences" in sample.columns:
-            emb_prefs = embed_buddy_preferences(sample, batch_size=20)
-            print(f"Buddy prefs embeddings: {len(emb_prefs)} rows. First len: {len(emb_prefs.iloc[0])}")
-            print("First buddy prefs vec (8 dims):", emb_prefs.iloc[0][:8])
+        featured_df = prepare_feature_columns(df_to_process, model=model, batch_size=20)
+
+        print("\n--- Feature Engineering Results ---")
+        print(featured_df.head())
+
+        if (
+            "profile_embedding" in featured_df.columns
+            and featured_df["profile_embedding"].notna().any()
+        ):
+            print("\nProfile embedding sample (first 8 dims):")
+            print(featured_df["profile_embedding"].iloc[0][:8])
+
+        if (
+            "preference_embedding" in featured_df.columns
+            and featured_df["preference_embedding"].notna().any()
+        ):
+            print("\nPreference embedding sample (first 8 dims):")
+            print(featured_df["preference_embedding"].iloc[0][:8])
+
+        if "regional_location" in featured_df.columns:
+            print("\nLocation normalization sample:")
+            print(featured_df[["location", "regional_location"]].head())
+
+        # Save the featured DataFrame to a new CSV
+        output_filename = f"{csv_path.stem}_featured.csv"
+        output_path = project_root / "data" / output_filename
+        featured_df.to_csv(output_path, index=False)
+        print(f"\nSuccessfully saved featured data to:\n{output_path}")
+
     except Exception as e:
-        print(f"Error testing normalize_location: {e}")
+        print(f"Error during feature engineering test: {e}")

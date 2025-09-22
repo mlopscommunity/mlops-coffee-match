@@ -5,6 +5,7 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
+import time
 from typing import Any, Dict, List
 
 import pandas as pd
@@ -108,7 +109,7 @@ def generate_synthetic(records: List[Dict[str, Any]], source_ids: List[str], num
     *   Do NOT include any other PII like emails, Slack handles, or LinkedIn URLs.
 3.  **Paraphrase and Generalize Content**:
     *   For fields like `summary`, `skills`, and `buddy_preferences`, paraphrase the content from the examples to sound natural and human-like while removing identifying details.
-    *   For `location`, use a general region (e.g., "West Coast, USA", "Western Europe") to reflect the global nature of the community.
+    *   For `location`, can be any level of description as this is a free text field and is a little ambiguous.
     *   For `skills`, ensure the output is a list of strings.
 4.  **Maintain Structure**:
     *   For categorical fields like `role`, `career_stage`, and `buddy_preference`, use the values from the examples.
@@ -181,8 +182,9 @@ def main() -> None:
         # Sample without replacement
         available_df = df[~df['respondent_id'].isin(used_ids)]
         if len(available_df) == 0:
-            print("No more source participants available")
-            break
+            print("No more unique source participants available, resetting pool.")
+            used_ids.clear()
+            available_df = df
             
         sampled_df = available_df.sample(n=min(batch_size, len(available_df)))
         used_ids.update(sampled_df['respondent_id'])
@@ -190,10 +192,18 @@ def main() -> None:
         # Generate
         records = prepare_llm_records(sampled_df, ALLOWED_LLM_FIELDS)
         source_ids = sampled_df['respondent_id'].tolist()
-        generated = generate_synthetic(records, source_ids, batch_size, args.provider, args.model)
         
+        start_time = time.time()
+        generated = generate_synthetic(records, source_ids, batch_size, args.provider, args.model)
+        end_time = time.time()
+        
+        if len(generated) > batch_size:
+            print(f"Warning: LLM generated {len(generated)} records, but batch size is {batch_size}. Truncating.")
+            generated = generated[:batch_size]
+
         all_generated.extend(generated)
-        print(f"Generated {len(generated)} (total: {len(all_generated)})")
+        duration = end_time - start_time
+        print(f"Generated {len(generated)} (total: {len(all_generated)}) in {duration:.2f} seconds")
 
     # Save
     pd.DataFrame(all_generated).to_csv(output_path, index=False)
