@@ -7,6 +7,31 @@ from dotenv import load_dotenv
 class SubregionList(pydantic.BaseModel):
     subregions: List[str]
 
+region_tiers = {
+    "North America": 1,
+    "Western Europe": 2,
+    "Eastern Europe": 2,
+    "East Asia": 3,
+    "South Asia": 4,
+    "Southeast Asia": 4,
+    "Middle East": 4,
+    "South America": 5,
+    "Northern Africa": 5,
+    "Central Asia": 5,
+    "Australia/New Zealand": 5,
+    "Sub-Saharan Africa": 5,
+    "Oceania": 6,
+    "Antarctica": 6
+}
+
+career_stage_level = {
+  "Undergrad / New Grad": 1,
+  "Graduate Student": 2,
+  "1 - 3 Years of Experience": 3,
+  "3 - 5 Years of Experience": 4,
+  "5 - 10 Years of Experience": 5,
+  "10+ Years of Experience": 6,
+}
 
 def gen_regional_locations(locations: pd.Series, model: str) -> pd.Series:
     """
@@ -65,8 +90,6 @@ def gen_regional_locations(locations: pd.Series, model: str) -> pd.Series:
             return locations
     # Final fallback if loop exits without returning
     return locations
-
-
 
 def normalize_location(df: pd.DataFrame, model: str, location: str, batch_size: int) -> pd.Series:
     """
