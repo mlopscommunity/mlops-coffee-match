@@ -14,6 +14,49 @@
   - **`preference_embedding`**: Generated from the `buddy_preferences` text. This vector represents what a person *wants*.
 - **Rationale**: This approach allows for a more precise similarity search, where we can directly compare a "Seeker's" `preference_embedding` against a "Candidate's" `profile_embedding`.
 
+### Pseudo-code: Feature Engineering Functions
+
+```python
+# feature_engineering.py
+
+def normalize_location_column(df, src_col="location", dst_col="location_region"):
+    # unique_locations = df[src_col].dropna().unique()
+    # mapping = {loc: small_llm_map_location(loc) for loc in unique_locations}
+    # df[dst_col] = df[src_col].fillna("").map(mapping).fillna("unknown").astype("category")
+    # return df
+
+def combine_profile_text(df, summary_col="summary", skills_col="skills", dst_col="profile_text"):
+    # def to_text(skills):
+    #     return ", ".join(skills) if isinstance(skills, list) else str(skills or "").strip()
+    # df[dst_col] = (
+    #     df[summary_col].fillna("").astype(str).str.strip()
+    #     + "\nSkills: " + df[skills_col].apply(to_text)
+    # ).str.replace(r"\s+", " ", regex=True).str.strip()
+    # return df
+
+def build_preference_text(df, pref_col="buddy_preferences", dst_col="preference_text"):
+    # df[dst_col] = (
+    #     "Looking for: " + df[pref_col].fillna("").astype(str)
+    # ).str.replace(r"\s+", " ", regex=True).str.strip()
+    # return df
+
+def generate_embeddings(df, text_col, out_col, model="text-embedding-3-small", batch_size=128):
+    # texts = df[text_col].fillna("").astype(str).tolist()
+    # vectors = []
+    # for batch in chunk_list(texts, batch_size):
+    #     vectors.extend(openai_embed(batch, model))
+    # df[out_col] = vectors
+    # return df
+
+def prepare_feature_columns(df):
+    # df = normalize_location_column(df)
+    # df = combine_profile_text(df)
+    # df = build_preference_text(df)
+    # df = generate_embeddings(df, "profile_text", "profile_embedding")
+    # df = generate_embeddings(df, "preference_text", "preference_embedding")
+    # return df
+```
+
 ## 3. Scoring and Matching Algorithm
 
 - **Initialization**:
