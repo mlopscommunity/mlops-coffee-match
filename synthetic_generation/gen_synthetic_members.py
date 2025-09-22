@@ -123,25 +123,32 @@ def generate_synthetic(records: List[Dict[str, Any]], source_ids: List[str], num
     
     content = ""
     if provider == "openai":
-        client = OpenAI()
-        openai_response = client.chat.completions.create(
+        openai_client = OpenAI()
+        openai_response = openai_client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
         content = openai_response.choices[0].message.content or "[]"
     elif provider == "anthropic":
         import anthropic
-        client = anthropic.Anthropic()
-        anthropic_response = client.messages.create(
+
+        anthropic_client = anthropic.Anthropic()
+        anthropic_response = anthropic_client.messages.create(
             model=model,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}]
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}],
         )
-        content = anthropic_response.content[0].text
+        if anthropic_response.content and isinstance(anthropic_response.content[0], anthropic.types.TextBlock):
+            content = anthropic_response.content[0].text
     else:
         raise ValueError(f"Unsupported provider: {provider}")
     
-    data = json.loads(content)
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        print("Error: Failed to decode JSON from LLM response.")
+        print(f"Content: {content}")
+        data = {}
     raw_records = data.get("participants", data) if isinstance(data, dict) else data
     return add_synthetic_metadata(raw_records, source_ids)
 
