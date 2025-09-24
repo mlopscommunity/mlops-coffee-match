@@ -33,41 +33,19 @@ career_stage_level = {
   "10+ Years of Experience": 6,
 }
 
-# --- Helpers to convert tiers into numeric features ---
+# --- Helpers to convert tiers into numeric features (hashmap only) ---
 def _infer_career_stage_level(series: pd.Series) -> pd.Series:
-    """Map a career-stage-like text column to numeric levels.
-    Uses career_stage_level keys first, then simple heuristics (years extraction, student hints).
-    Returns an int Series with fallback 3 (1-3 yrs bucket).
+    """Strict mapping from dropdown values to numeric levels using career_stage_level.
+    Raises if unseen labels are present to avoid silent heuristics.
     """
     mapped = series.map(career_stage_level)
-    if mapped.notna().any():
-        return mapped.fillna(3).astype(int)
-
-    import re
-
-    def to_level(v: Any) -> int:
-        s = str(v or "").strip().lower()
-        # fuzzy containment against known labels
-        for k, lvl in career_stage_level.items():
-            if s in k.lower() or k.lower() in s:
-                return lvl
-        m = re.search(r"(\d+)\s*\+?", s)
-        if m:
-            y = int(m.group(1))
-            if y >= 10:
-                return 6
-            if y >= 5:
-                return 5
-            if y >= 3:
-                return 4
-            if y >= 1:
-                return 3
-            return 2
-        if any(tok in s for tok in ["student", "undergrad", "grad"]):
-            return 2
-        return 3
-
-    return series.apply(to_level).astype(int)
+    if mapped.isna().any():
+        missing = sorted(set(series[mapped.isna()].dropna().unique()))
+        raise ValueError(
+            "Unknown career_stage values encountered: " + ", ".join(map(str, missing)) +
+            ". Update career_stage_level to include these labels."
+        )
+    return mapped.astype(int)
 
 def gen_regional_locations(locations: pd.Series, model: str) -> pd.Series:
     """
@@ -255,28 +233,26 @@ def prepare_feature_columns(
         out["regional_location"] = pd.Series([None] * len(out), index=out.index)
 
     # --- Numeric tiers and composite priority ---
-    # Region tier (lower tier number = higher priority). Unknown -> worst tier.
+    # Region tier (lower tier number = higher priority). Strict mapping from dropdown values.
+    if "regional_location" not in out.columns:
+        raise ValueError("Expected column 'regional_location' not found. Ensure normalization or dropdown export provides it.")
     max_region = max(region_tiers.values()) if len(region_tiers) else 6
-    out["region_tier"] = (
-        out["regional_location"].map(region_tiers).fillna(max_region).astype(int)
-    )
+    out["region_tier"] = out["regional_location"].map(region_tiers)
+    if out["region_tier"].isna().any():
+        missing_regions = sorted(set(out.loc[out["region_tier"].isna(), "regional_location"].dropna().unique()))
+        raise ValueError(
+            "Unknown regional_location values encountered: " + ", ".join(map(str, missing_regions)) +
+            ". Update region_tiers to include these labels."
+        )
+    out["region_tier"] = out["region_tier"].astype(int)
     # Normalize to [0,1] with tier 1 -> 1.0 priority
     denom = (max_region - 1) if (max_region - 1) != 0 else 1
     out["region_priority_norm"] = 1 - (out["region_tier"] - 1) / denom
 
-    # Career stage numeric level from any present column, then normalize
-    stage_col = None
-    for c in [
-        "career_stage",
-        "career_stage_bucket",
-        "experience_bucket",
-        "years_of_experience_bucket",
-    ]:
-        if c in out.columns:
-            stage_col = c
-            break
-    source_series = out[stage_col] if stage_col else pd.Series([None] * len(out), index=out.index)
-    out["career_stage_level_num"] = _infer_career_stage_level(source_series)
+    # Career stage numeric level (dropdown mapping only) then normalize
+    if "career_stage" not in out.columns:
+        raise ValueError("Expected column 'career_stage' not found.")
+    out["career_stage_level_num"] = _infer_career_stage_level(out["career_stage"]) 
     max_stage = max(career_stage_level.values()) if len(career_stage_level) else 6
     out["career_stage_norm"] = out["career_stage_level_num"].astype(float) / max_stage
 
