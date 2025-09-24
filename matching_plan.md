@@ -62,7 +62,7 @@ def prepare_feature_columns(df):
 - **Initialization**:
   - Load all participants into a single DataFrame.
   - Sort the DataFrame by `buddy_preference` to create a processing queue that places participants with hard constraints at the top.
-- **Core Agentic Loop**:
+- **Core Matching Loop**:
   - For each person (the "Seeker") in the sorted queue:
     1.  **Invoke LLM Agent**: The agent receives the Seeker's profile and access to a powerful `find_best_matches` tool.
     2.  **Hybrid Search**: The agent uses the tool to get a top-10 list of candidates. The tool combines:
@@ -91,7 +91,7 @@ def prepare_feature_columns(df):
 
 - **Project Structure**:
   - Create a new `matching/` directory to house all logic for the recommendation system, separating it from `synthetic_generation/`.
-  - Key modules will include `data_models.py`, `feature_engineering.py`, `agent.py`, and a `main.py` for the CLI.
+  - Key modules will include `data_models.py`, `feature_engineering.py`, `matcher.py`, and a `main.py` for the CLI.
 - **Core Libraries**:
   - **Data Handling**: `pandas` will be used to manage the participant data, including storing the generated embeddings as new columns.
   - **Vector Search**: No vector database is needed. The hybrid search tool will be implemented in-memory by chaining two steps: first, using `pandas` to apply any hard filters (like `role`) to create a temporary, smaller DataFrame of eligible candidates. Second, running `scikit-learn`'s `cosine_similarity` *only* on this pre-filtered subset, ensuring an efficient and combined ranking process.

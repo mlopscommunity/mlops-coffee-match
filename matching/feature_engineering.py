@@ -196,6 +196,8 @@ def prepare_feature_columns(
       - profile_embedding: from combined profile text (summary + skills + role + company)
       - preference_embedding: from buddy_preferences
       - regional_location: normalized from location
+      - region_tier: numeric tier level for regional_location (1-6)
+      - career_stage_level: numeric level for career_stage (1-6)
     Returns a new DataFrame with added columns.
     """
     print("Starting feature preparation...")
@@ -217,6 +219,20 @@ def prepare_feature_columns(
         )
     else:
         out["regional_location"] = pd.Series([None] * len(out), index=out.index)
+
+    # Map regional locations to tier levels
+    if "regional_location" in out.columns:
+        print("Mapping regional locations to tier levels...")
+        out["region_tier"] = out["regional_location"].map(region_tiers)
+    else:
+        out["region_tier"] = pd.Series([None] * len(out), index=out.index)
+
+    # Map career stages to level numbers
+    if "career_stage" in out.columns:
+        print("Mapping career stages to level numbers...")
+        out["career_stage_level"] = out["career_stage"].map(career_stage_level)
+    else:
+        out["career_stage_level"] = pd.Series([None] * len(out), index=out.index)
 
     print("Feature preparation complete.")
     return out
@@ -270,6 +286,14 @@ if __name__ == "__main__":
         if "regional_location" in featured_df.columns:
             print("\nLocation normalization sample:")
             print(featured_df[["location", "regional_location"]].head())
+
+        if "region_tier" in featured_df.columns:
+            print("\nRegion tier mapping sample:")
+            print(featured_df[["regional_location", "region_tier"]].head())
+
+        if "career_stage_level" in featured_df.columns:
+            print("\nCareer stage level mapping sample:")
+            print(featured_df[["career_stage", "career_stage_level"]].head())
 
         # Save the featured DataFrame to a new CSV
         output_filename = f"{csv_path.stem}_featured.csv"
