@@ -40,6 +40,15 @@ This is an AI-powered recommendation system for matching MLOps community members
 - **Typer** for CLI interfaces
 - **Rich** for enhanced terminal output
 
+## Development Methodology
+- **Incremental Development**: Change at most a couple dozen lines at a time
+- **Single Function Focus**: Set up one function at a time with:
+  - Clear function signature with typed parameters
+  - Comprehensive docstring explaining purpose and behavior
+  - Pseudocode outlining the intended control flow
+- **Keep It Simple**: Avoid implementing multiple functions simultaneously
+- **Straightforward Approach**: Prioritize clarity and maintainability over complexity
+
 ## Critical Constraints
 - Never commit real participant data to version control
 - Always exclude PII fields from LLM processing
