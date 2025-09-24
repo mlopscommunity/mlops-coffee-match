@@ -33,19 +33,7 @@ career_stage_level = {
   "10+ Years of Experience": 6,
 }
 
-# --- Helpers to convert tiers into numeric features (hashmap only) ---
-def _infer_career_stage_level(series: pd.Series) -> pd.Series:
-    """Strict mapping from dropdown values to numeric levels using career_stage_level.
-    Raises if unseen labels are present to avoid silent heuristics.
-    """
-    mapped = series.map(career_stage_level)
-    if mapped.isna().any():
-        missing = sorted(set(series[mapped.isna()].dropna().unique()))
-        raise ValueError(
-            "Unknown career_stage values encountered: " + ", ".join(map(str, missing)) +
-            ". Update career_stage_level to include these labels."
-        )
-    return mapped.astype(int)
+# Note: No heuristic helpers. We expect strict dropdown values for career_stage.
 
 def gen_regional_locations(locations: pd.Series, model: str) -> pd.Series:
     """
@@ -232,35 +220,9 @@ def prepare_feature_columns(
     else:
         out["regional_location"] = pd.Series([None] * len(out), index=out.index)
 
-    # --- Numeric tiers and composite priority ---
-    # Region tier (lower tier number = higher priority). Strict mapping from dropdown values.
-    if "regional_location" not in out.columns:
-        raise ValueError("Expected column 'regional_location' not found. Ensure normalization or dropdown export provides it.")
-    max_region = max(region_tiers.values()) if len(region_tiers) else 6
-    out["region_tier"] = out["regional_location"].map(region_tiers)
-    if out["region_tier"].isna().any():
-        missing_regions = sorted(set(out.loc[out["region_tier"].isna(), "regional_location"].dropna().unique()))
-        raise ValueError(
-            "Unknown regional_location values encountered: " + ", ".join(map(str, missing_regions)) +
-            ". Update region_tiers to include these labels."
-        )
-    out["region_tier"] = out["region_tier"].astype(int)
-    # Normalize to [0,1] with tier 1 -> 1.0 priority
-    denom = (max_region - 1) if (max_region - 1) != 0 else 1
-    out["region_priority_norm"] = 1 - (out["region_tier"] - 1) / denom
-
-    # Career stage numeric level (dropdown mapping only) then normalize
-    if "career_stage" not in out.columns:
-        raise ValueError("Expected column 'career_stage' not found.")
-    out["career_stage_level_num"] = _infer_career_stage_level(out["career_stage"]) 
-    max_stage = max(career_stage_level.values()) if len(career_stage_level) else 6
-    out["career_stage_norm"] = out["career_stage_level_num"].astype(float) / max_stage
-
-    # Composite priority for pre-sorting candidate pools
-    STAGE_W, REGION_W = 0.7, 0.3
-    out["priority_score"] = (
-        STAGE_W * out["career_stage_norm"] + REGION_W * out["region_priority_norm"]
-    )
+    # Note: We do NOT compute numeric tiers or composite priority here anymore.
+    # Regional subregions are generated via gen_regional_locations.
+    # Career stage remains as dropdown text; tiering/priority is handled at recommend-time.
 
     print("Feature preparation complete.")
     return out
