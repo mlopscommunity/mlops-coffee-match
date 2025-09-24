@@ -178,7 +178,7 @@ def top_funnel_matches(
     return pd.concat(all_top_matches).reset_index(drop=True)
 
 def llm_as_a_matcher(matches_df: pd.DataFrame) -> pd.DataFrame:
-    return None
+    return matches_df
 
 def match_participants(participants_df: pd.DataFrame) -> pd.DataFrame:
     """
