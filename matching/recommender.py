@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from .ingest import FIELD_ALIASES, get_alias_series, resolve_aliases
 
 ProfileEmb = List[float]
 
@@ -39,25 +40,44 @@ def _safe_cosine(a: Optional[ProfileEmb], b: Optional[ProfileEmb]) -> float:
     return float((sim + 1.0) / 2.0)
 
 
+def _get_alias_map(df: pd.DataFrame) -> Dict[str, Optional[str]]:
+    alias_map = df.attrs.get("alias_map")
+    if not alias_map:
+        alias_map = resolve_aliases(df)
+        df.attrs["alias_map"] = alias_map
+    return alias_map
+
+
+def _combine_alias_text(df: pd.DataFrame, keys: List[str]) -> pd.Series:
+    alias_map = _get_alias_map(df)
+    pieces = []
+    for key in keys:
+        col = alias_map.get(key)
+        if col is None:
+            # fallback to other aliases defined for that key
+            for candidate in FIELD_ALIASES.get(key, []):
+                if candidate in df.columns:
+                    col = candidate
+                    break
+        if col is not None and col in df.columns:
+            series = df[col].fillna("").astype(str)
+        else:
+            series = pd.Series([""] * len(df), index=df.index)
+        pieces.append(series)
+    if not pieces:
+        return pd.Series([" "] * len(df), index=df.index)
+    stacked = pd.concat(pieces, axis=1)
+    combined = stacked.apply(
+        lambda row: " | ".join([part for part in row if isinstance(part, str) and part.strip()]) or " ",
+        axis=1,
+    )
+    return combined.str.replace("\n", " ").str.replace(r"\s+", " ", regex=True).str.strip().replace({"": " "})
+
+
 def _text_fallback_embeddings(df: pd.DataFrame) -> Tuple[List[ProfileEmb], List[ProfileEmb]]:
     """If profile/preference embeddings are missing, build TF-IDF vectors as fallback."""
-    # profile text
-    profile_text = (
-        df.reindex(columns=["company", "role", "summary", "skills"], fill_value="")
-        .astype(str)
-        .agg(" | ".join, axis=1)
-        .str.replace("\n", " ")
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-    ).tolist()
-
-    pref_text = (
-        df.get("buddy_preferences", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
-        .str.replace("\n", " ")
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-    ).tolist()
+    profile_text = _combine_alias_text(df, ["company", "role", "summary", "skills"]).tolist()
+    pref_text = _combine_alias_text(df, ["buddy_preferences"]).tolist()
 
     vec = TfidfVectorizer(max_features=2048)
     prof_mat = vec.fit_transform(profile_text).astype(np.float32)
@@ -140,6 +160,8 @@ def _maybe_parse_vec(val: Any) -> Optional[List[float]]:
 
 def _ensure_embeddings(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
+    alias_map = resolve_aliases(out)
+    out.attrs["alias_map"] = alias_map
     # Try to parse any existing embedding strings to lists
     if "profile_embedding" in out.columns:
         out["profile_embedding"] = out["profile_embedding"].apply(_maybe_parse_vec)
@@ -154,6 +176,7 @@ def _ensure_embeddings(df: pd.DataFrame) -> pd.DataFrame:
         # build only pref if missing
         _, pref = _text_fallback_embeddings(out)
         out["preference_embedding"] = pref
+    out.attrs["alias_map"] = alias_map
     return out
 
 
@@ -206,15 +229,21 @@ def _ensure_tiers_and_priority(df: pd.DataFrame) -> pd.DataFrame:
     Uses regional_location (if available) to compute region_tier and priority.
     """
     out = df.copy()
+    alias_map = _get_alias_map(out)
     # career stage numeric
     if "career_stage_level_num" not in out.columns:
-        stage_col = next((c for c in [
-            "career_stage",
-            "career_stage_bucket",
-            "experience_bucket",
-            "years_of_experience_bucket",
-        ] if c in out.columns), None)
-        source = out[stage_col] if stage_col else pd.Series([None]*len(out), index=out.index)
+        stage_col = alias_map.get("career_stage")
+        if stage_col is None:
+            for candidate in [
+                "career_stage",
+                "career_stage_bucket",
+                "experience_bucket",
+                "years_of_experience_bucket",
+            ]:
+                if candidate in out.columns:
+                    stage_col = candidate
+                    break
+        source = out[stage_col] if stage_col else pd.Series([None] * len(out), index=out.index)
         out["career_stage_level_num"] = _infer_career_stage_level(source)
 
     # region tier and priority
@@ -242,7 +271,13 @@ def _ensure_tiers_and_priority(df: pd.DataFrame) -> pd.DataFrame:
                 out["regional_location"].map(region_tiers).fillna(max_region).astype(int)
             )
         else:
-            out["region_tier"] = max_region
+            loc_col = alias_map.get("location")
+            if loc_col and loc_col in out.columns:
+                out["region_tier"] = (
+                    out[loc_col].map(region_tiers).fillna(max_region).astype(int)
+                )
+            else:
+                out["region_tier"] = max_region
         denom = (max_region - 1) if (max_region - 1) != 0 else 1
         out["region_priority_norm"] = 1 - (out["region_tier"] - 1) / denom
 
@@ -253,10 +288,26 @@ def _ensure_tiers_and_priority(df: pd.DataFrame) -> pd.DataFrame:
             STAGE_W * out["career_stage_norm"] + REGION_W * out["region_priority_norm"]
         )
 
+    out.attrs["alias_map"] = alias_map
     return out
 
 
-def score_pair(a_row: pd.Series, b_row: pd.Series, weights: ScoreWeights) -> Tuple[float, Dict[str, float]]:
+def _value_from_alias(row: pd.Series, key: str, alias_map: Dict[str, Optional[str]]) -> Any:
+    col = alias_map.get(key)
+    if col and col in row.index:
+        return row.get(col)
+    for candidate in FIELD_ALIASES.get(key, []):
+        if candidate in row.index:
+            return row.get(candidate)
+    return None
+
+
+def score_pair(
+    a_row: pd.Series,
+    b_row: pd.Series,
+    weights: ScoreWeights,
+    alias_map: Dict[str, Optional[str]],
+) -> Tuple[float, Dict[str, float]]:
     # preference alignment in both directions
     pref_a_to_b = _safe_cosine(a_row.get("preference_embedding"), b_row.get("profile_embedding"))
     pref_b_to_a = _safe_cosine(b_row.get("preference_embedding"), a_row.get("profile_embedding"))
@@ -264,9 +315,13 @@ def score_pair(a_row: pd.Series, b_row: pd.Series, weights: ScoreWeights) -> Tup
 
     profile_sim = _safe_cosine(a_row.get("profile_embedding"), b_row.get("profile_embedding"))
 
-    location = _location_proximity(a_row.get("regional_location"), b_row.get("regional_location"))
+    loc_a = a_row.get("regional_location") or _value_from_alias(a_row, "location", alias_map)
+    loc_b = b_row.get("regional_location") or _value_from_alias(b_row, "location", alias_map)
+    location = _location_proximity(loc_a, loc_b)
     stage = _career_stage_affinity(a_row.get("career_stage_level_num"), b_row.get("career_stage_level_num"))
-    role = _role_match_boost(a_row.get("role"), b_row.get("role"))
+    role_a = _value_from_alias(a_row, "role", alias_map)
+    role_b = _value_from_alias(b_row, "role", alias_map)
+    role = _role_match_boost(role_a, role_b)
 
     score = (
         weights.w_mutual_pref * mutual_pref
@@ -292,6 +347,7 @@ def top_k_for_index(df: pd.DataFrame, idx: int, k: int = 15, weights: Optional[S
 
     df2 = _ensure_embeddings(df)
     df2 = _ensure_tiers_and_priority(df2)
+    alias_map = _get_alias_map(df2)
     if "priority_score" in df2.columns:
         # pre-sort to cut search space, keep 200 best by priority excluding self
         pool = df2.drop(index=idx).sort_values("priority_score", ascending=False).head(max(200, k * 5))
@@ -301,7 +357,7 @@ def top_k_for_index(df: pd.DataFrame, idx: int, k: int = 15, weights: Optional[S
     a_row = df2.loc[idx]
     scores: List[Tuple[int, float, Dict[str, float]]] = []
     for j, b_row in pool.iterrows():
-        s, comps = score_pair(a_row, b_row, weights)
+        s, comps = score_pair(a_row, b_row, weights, alias_map)
         scores.append((j, s, comps))
 
     scores.sort(key=lambda x: x[1], reverse=True)
@@ -335,6 +391,7 @@ def greedy_global_pairing(
         weights = ScoreWeights()
     df2 = _ensure_embeddings(df)
     df2 = _ensure_tiers_and_priority(df2)
+    alias_map = _get_alias_map(df2)
     n = len(df2)
 
     if strategy == "edge":
@@ -382,7 +439,7 @@ def greedy_global_pairing(
             for jj in df2.index:
                 if jj in used or jj == i:
                     continue
-                s, _ = score_pair(a_row, df2.loc[jj], weights)
+                s, _ = score_pair(a_row, df2.loc[jj], weights, alias_map)
                 if s > best_s:
                     best_s, best_j = s, jj
             if best_j is not None:
