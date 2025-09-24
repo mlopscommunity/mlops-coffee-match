@@ -33,6 +33,8 @@ career_stage_level = {
   "10+ Years of Experience": 6,
 }
 
+# Note: No heuristic helpers. We expect strict dropdown values for career_stage.
+
 def gen_regional_locations(locations: pd.Series, model: str) -> pd.Series:
     """
     Generate regional locations for a given pandas Series of locations.
