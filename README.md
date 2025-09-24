@@ -104,6 +104,10 @@ High‑level flow for synthetic data generation and inspection:
 - Scripts under `synthetic_generation/`:
   - `gen_synthetic_members.py`: CLI to read, sample, and optionally generate via OpenAI
   - `synth_models.py`: Pydantic models for structured outputs (input/output alignment)
+- Scripts under `matching/`:
+  - `feature_engineering.py`: Prepares data by creating embeddings and normalizing locations.
+  - `matcher.py`: Contains the core logic for pairing participants based on engineered features.
+  - `data_models.py`: Defines Pydantic models for participants and matches.
 
 What it does now:
 - Reads `data/private_mlops_marchvc.csv` into a DataFrame

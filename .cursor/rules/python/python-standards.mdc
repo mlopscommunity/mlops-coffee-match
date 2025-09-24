@@ -1,0 +1,73 @@
+---
+description: Python coding standards and best practices for this project
+globs: ["**/*.py"]
+alwaysApply: true
+---
+
+# Python Development Standards
+
+## Code Style
+- Follow PEP 8 style guidelines
+- Use type hints for all function parameters and return values
+- Include Google-style docstrings for all functions and classes
+- Use descriptive variable and function names
+- Keep functions focused and under 50 lines when possible
+
+## Function Writing Best Practices
+
+### Before implementing any function:
+1. Define the function name clearly
+2. Specify arguments with explicit types
+3. Write a docstring with concise summary
+4. Provide intended control flow as brief pseudocode
+
+### Good Example:
+```python
+def generate_embeddings(
+    texts: List[str], 
+    model: str = "text-embedding-3-small",
+    batch_size: int = 128
+) -> List[List[float]]:
+    """
+    Generate embeddings for a list of texts using OpenAI's embedding API.
+    
+    Pseudocode:
+    1. Split texts into batches of batch_size
+    2. For each batch, call OpenAI embedding API
+    3. Collect all embeddings and return as list
+    """
+    # Implementation here
+```
+
+### Bad Example:
+```python
+def foo(x):
+    pass
+```
+
+## Data Models (Pydantic)
+- Use descriptive field names that match data sources
+- Include comprehensive docstrings explaining model purpose
+- Use Optional types for fields that may be missing
+- Include Field() with descriptions for complex fields
+- Validate data types and ranges appropriately
+
+## Error Handling
+- Use specific exception types
+- Include meaningful error messages
+- Handle edge cases gracefully
+- Log important operations and errors
+- Use try/except blocks for external API calls
+
+## Imports
+- Group imports: standard library, third-party, local
+- Use absolute imports for local modules
+- Import only what you need
+- Use `from typing import` for type hints
+
+## Project-Specific Patterns
+- Use `uv` for dependency management (not pip)
+- Store API keys in environment variables
+- Use `python-dotenv` for environment variable loading
+- Implement proper logging with structured messages
+- Use pandas for data processing with explicit column names
