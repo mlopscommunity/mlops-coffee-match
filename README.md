@@ -183,11 +183,11 @@ End‑to‑end matcher that prepares features, builds a shortlist per seeker, an
   - Pydantic‑validated structured output (`LLMMatchRecommendation`)
 - Progress logs every 5 pairs (and final pair)
 
-### Run matching
+### Run matching (synthetic data quick start)
 ```bash
-uv run python scripts/run_matching.py
+uv run python scripts/run_matching.py --input data_examples/synthetic_participants_20250922_151750.csv --output data_examples/matches.csv
 ```
-Defaults read from `scripts/run_matching.py` (edit `INPUT_CSV`/`OUTPUT_CSV`). Optionally set `OPENAI_MODEL=gpt-5-mini`.
+Optionally set `OPENAI_MODEL=gpt-5-mini`.
 
 ### Enrich for human review (CSV + Markdown)
 ```bash

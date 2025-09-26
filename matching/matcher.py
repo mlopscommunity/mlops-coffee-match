@@ -203,12 +203,15 @@ def llm_as_a_matcher(
         )
         return match, intro_message
 
-    # Prepare compact payload for potential LLM call
+    # Prepare compact payload for potential LLM call (strings are pre-cleaned upstream)
     seeker_info = {
         "id": seeker_id,
         "role": seeker.get("role", ""),
         "region": seeker.get("region", ""),
         "summary": seeker.get("summary", ""),
+        "company": seeker.get("company", ""),
+        "buddy_preference": seeker.get("buddy_preference", ""),
+        "buddy_preferences": seeker.get("buddy_preferences", ""),
     }
     candidates_info = []
     for _, row in shortlist.iterrows():
@@ -218,6 +221,9 @@ def llm_as_a_matcher(
                 "role": row.get("role", ""),
                 "region": row.get("region", ""),
                 "summary": row.get("summary", ""),
+                "company": row.get("company", ""),
+                "buddy_preference": row.get("buddy_preference", ""),
+                "buddy_preferences": row.get("buddy_preferences", ""),
                 "similarity": float(row["similarity_score"]),
             }
         )
@@ -388,7 +394,11 @@ def call_llm_choose_buddy(
     SYSTEM_PROMPT = (
         "You are a careful pairing assistant for a virtual coffee program. "
         "Given a seeker and a shortlist of candidates, choose exactly one buddy from the provided ids. "
-        "Use similarity as a signal alongside role fit, experience complementarity, and regional context. "
+        "When writing justifications and intros, focus on concrete profile evidence: role/skills, "
+        "background/summary themes, company, preference alignment, and location/region context. "
+        "Do NOT mention numeric similarity scores or that someone is the 'highest similarity'. "
+        "Do NOT include raw participant ids or any identifier strings in natural language text. "
+        "Write human-friendly sentences that reference themes (e.g., platform MLOps, model monitoring, startup ops, EU timezone overlap). "
         "Do not invent personal names or use placeholder tokens like [seeker name] or [buddy name]. "
         "If names are not provided, write a short, generic intro that explains why they were paired "
         "using themes like roles, skills, interests, or regions. "
@@ -401,8 +411,9 @@ def call_llm_choose_buddy(
         "candidates": candidates,
         "instructions": [
             "Pick exactly one candidate whose id appears in candidates.",
-            "Keep justification to 1-2 sentences.",
-            "Include 2-4 concise icebreaker topics based on roles, interests, or regions.",
+            "Keep justification to 1-2 sentences that reference preferences, background/summary, roles/skills, and region/timezone where relevant.",
+            "Never mention similarity scores and never cite raw ids in the text.",
+            "Include 2-4 concise icebreaker topics derived from overlapping interests/skills, complementary experience, or regional context.",
             "Do not fabricate names or use placeholder tokens; if names are unknown, write a friendly generic intro explaining the pairing themes.",
         ],
     }
