@@ -285,7 +285,9 @@ def render_markdown(enriched_df: pd.DataFrame, out_path_md: Path) -> None:
 
         lines.append("")
         lines.append(f"A summary: {trunc(row.get('A_summary'))}\n")
+        lines.append(f"B summary: {trunc(row.get('B_summary'))}\n")
         lines.append(f"A preferences: {trunc(row.get('A_buddy_preferences'))}\n")
+        lines.append(f"B preferences: {trunc(row.get('B_buddy_preferences'))}\n")
 
         just = trunc(row.get("llm_justification"), 400)
         lines.append("")
