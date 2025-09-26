@@ -62,3 +62,58 @@ def clean_coffee_df(df: pd.DataFrame) -> pd.DataFrame:
 def clean_coffee_csv(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     return clean_coffee_df(df)
+
+
+def ensure_standard_fields(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure standard string fields exist and are clean for downstream LLM prompts.
+
+    Creates/normalizes the following columns if missing: 'role', 'summary', 'company',
+    'buddy_preference', 'buddy_preferences', and 'region'. Values are coerced to
+    trimmed strings with NaNs/None replaced by empty strings.
+
+    Args:
+        df: Input DataFrame.
+
+    Returns:
+        A copy of the DataFrame with the standardized columns present and cleaned.
+    """
+    out = df.copy()
+    alias_map = resolve_aliases(out)
+
+    def _copy_if_missing(target: str, alias_key: str) -> None:
+        if target not in out.columns:
+            alias_col = alias_map.get(alias_key)
+            if alias_col is not None and alias_col in out.columns:
+                out[target] = out[alias_col]
+
+    # Create columns from aliases when absent
+    _copy_if_missing("role", "role")
+    _copy_if_missing("summary", "summary")
+    _copy_if_missing("company", "company")
+    _copy_if_missing("buddy_preference", "buddy_preference")
+    _copy_if_missing("buddy_preferences", "buddy_preferences")
+
+    # Map regional_location (feature engineered) to region if region missing
+    if "region" not in out.columns and "regional_location" in out.columns:
+        out["region"] = out["regional_location"]
+
+    # Coerce to clean strings for LLM payload fields
+    for col in [
+        "role",
+        "summary",
+        "company",
+        "buddy_preference",
+        "buddy_preferences",
+        "region",
+    ]:
+        if col not in out.columns:
+            out[col] = ""
+        series = out[col]
+        # Convert non-strings, replace NaN/None-like tokens, and strip
+        series = series.astype(str)
+        series = series.replace({"nan": "", "None": "", "NaN": "", "NULL": ""})
+        series = series.str.replace("\n", " ")
+        series = series.str.replace(r"\s+", " ", regex=True)
+        out[col] = series.str.strip()
+
+    return out
