@@ -26,12 +26,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from matching.matcher import read_participants, match_participants
 from matching.feature_engineering import prepare_feature_columns
+from matching.ingest import resolve_aliases
 from dotenv import load_dotenv
 
 
 # Edit this path to point at the CSV you want to match on
-INPUT_CSV = Path("data_examples/synthetic_participants_20250922_151750.csv")
-OUTPUT_CSV = Path("data_examples/matches.csv")
+INPUT_CSV = Path("data/private_mlops_marchvc.csv")
+OUTPUT_CSV = Path("data/private_mlops_marchvc_matches.csv")
 
 
 def main() -> None:
@@ -63,28 +64,50 @@ def main() -> None:
     # 2b) Normalize columns expected by matcher
     print("[3/5] Normalizing columns for matcher expectations...")
     df = fe_df.copy()
+    alias_map = resolve_aliases(df)
     # Embedding columns mapping
     if "personal_summary_embedding" not in df.columns and "profile_embedding" in df.columns:
         df = df.rename(columns={"profile_embedding": "personal_summary_embedding"})
     if "buddy_preferences_embedding" not in df.columns and "preference_embedding" in df.columns:
         df = df.rename(columns={"preference_embedding": "buddy_preferences_embedding"})
-    # Participant id normalization
+    # Participant id normalization (use aliases first, then fallbacks)
     if "participant_id" not in df.columns:
-        id_candidates = [
-            "participant_id",
-            "synthetic_id",
-            "respondent_id",
-            "id",
-        ]
-        for col in id_candidates:
-            if col in df.columns:
-                df["participant_id"] = df[col].astype(str)
-                break
+        id_alias = alias_map.get("id")
+        if id_alias is not None and id_alias in df.columns:
+            df["participant_id"] = df[id_alias].astype(str)
+        else:
+            id_candidates = [
+                "participant_id",
+                "synthetic_id",
+                "respondent_id",
+                "Respondent ID",
+                "source_participant_id",
+                "Participant ID",
+                "id",
+            ]
+            for col in id_candidates:
+                if col in df.columns:
+                    df["participant_id"] = df[col].astype(str)
+                    break
+
+    # buddy_preference normalization for ordering (use alias mapping)
+    if "buddy_preference" not in df.columns:
+        bp_alias = alias_map.get("buddy_preference")
+        if bp_alias is not None and bp_alias in df.columns:
+            df["buddy_preference"] = df[bp_alias]
     # Ensure required numeric tiers exist (if missing, fill with defaults)
     if "career_stage_level" not in df.columns:
         df["career_stage_level"] = 3  # neutral mid-tier default
     if "region_tier" not in df.columns:
         df["region_tier"] = 3  # neutral mid-tier default
+
+    # Coerce to numeric and fill missing with defaults to avoid NoneType math
+    df["career_stage_level"] = (
+        pd.to_numeric(df["career_stage_level"], errors="coerce").fillna(3).astype(int)
+    )
+    df["region_tier"] = (
+        pd.to_numeric(df["region_tier"], errors="coerce").fillna(3).astype(int)
+    )
 
     # 3) Run matching (handles ordering internally)
     try:

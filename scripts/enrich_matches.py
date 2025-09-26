@@ -18,6 +18,14 @@ import pandas as pd
 import argparse
 import json
 from datetime import datetime
+import sys
+
+# Ensure project root (parent of scripts/) is on sys.path for package imports
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from matching.ingest import resolve_aliases
 
 
 def load_csv(path: Path) -> pd.DataFrame:
@@ -36,8 +44,9 @@ def load_csv(path: Path) -> pd.DataFrame:
 def normalize_participant_ids(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure the DataFrame has a `participant_id` column as string for joins.
 
-    Tries common identifier columns in order: `participant_id`, `synthetic_id`,
-    `respondent_id`, `id`. If none exist, raises a ValueError.
+    Tries common identifier columns in order using alias mapping and known
+    Sheets headers: `participant_id`, alias(`id`), `synthetic_id`,
+    `respondent_id`/`Respondent ID`, `source_participant_id`, `Participant ID`, `id`.
 
     Args:
         df: Participants DataFrame.
@@ -50,10 +59,28 @@ def normalize_participant_ids(df: pd.DataFrame) -> pd.DataFrame:
     if "participant_id" in out.columns:
         out["participant_id"] = out["participant_id"].astype(str)
         return out
-    for col in ["synthetic_id", "respondent_id", "id"]:
+
+    # Try alias map first
+    alias_map = resolve_aliases(out)
+    id_alias = alias_map.get("id")
+    if id_alias is not None and id_alias in out.columns:
+        out["participant_id"] = out[id_alias].astype(str)
+        return out
+
+    # Fallback common headers
+    candidates = [
+        "synthetic_id",
+        "respondent_id",
+        "Respondent ID",
+        "source_participant_id",
+        "Participant ID",
+        "id",
+    ]
+    for col in candidates:
         if col in out.columns:
             out["participant_id"] = out[col].astype(str)
             return out
+
     raise ValueError("No suitable identifier column found to create `participant_id`.")
 
 
