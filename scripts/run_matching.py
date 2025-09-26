@@ -18,6 +18,7 @@ from pathlib import Path
 import os
 import sys
 import pandas as pd
+import argparse
 
 # Ensure project root (parent of scripts/) is on sys.path for package imports
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -26,11 +27,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from matching.matcher import read_participants, match_participants
 from matching.feature_engineering import prepare_feature_columns
-from matching.ingest import resolve_aliases
+from matching.ingest import resolve_aliases, ensure_standard_fields
 from dotenv import load_dotenv
 
 
-# Edit this path to point at the CSV you want to match on
+# Defaults (can be overridden via CLI flags --input/--output)
 INPUT_CSV = Path("data/private_mlops_marchvc.csv")
 OUTPUT_CSV = Path("data/private_mlops_marchvc_matches.csv")
 
@@ -43,12 +44,22 @@ def main() -> None:
         KeyError: If required columns are missing for matching.
     """
     load_dotenv()
-    if not INPUT_CSV.exists():
-        raise FileNotFoundError(f"Input CSV not found: {INPUT_CSV}")
+
+    # Optional CLI overrides
+    parser = argparse.ArgumentParser(description="Run matching pipeline")
+    parser.add_argument("--input", type=str, default=None, help="Path to participants CSV")
+    parser.add_argument("--output", type=str, default=None, help="Path to write matches CSV")
+    args, _ = parser.parse_known_args()
+
+    input_csv = Path(args.input) if args.input else INPUT_CSV
+    output_csv = Path(args.output) if args.output else OUTPUT_CSV
+
+    if not input_csv.exists():
+        raise FileNotFoundError(f"Input CSV not found: {input_csv}")
 
     # 1) Load participants
-    print(f"[1/5] Loading participants from {INPUT_CSV}...")
-    participants_df: pd.DataFrame = read_participants(str(INPUT_CSV))
+    print(f"[1/5] Loading participants from {input_csv}...")
+    participants_df: pd.DataFrame = read_participants(str(input_csv))
     print(f"       Loaded {len(participants_df)} rows.")
 
     # 2) Feature engineering to produce embeddings and tiers
@@ -90,11 +101,26 @@ def main() -> None:
                     df["participant_id"] = df[col].astype(str)
                     break
 
+    # Ensure participant_id values are strings
+    if "participant_id" in df.columns:
+        df["participant_id"] = df["participant_id"].astype(str)
+
+    # Make participant_id unique to avoid removing multiple rows per iteration when duplicates exist
+    if "participant_id" in df.columns and df["participant_id"].duplicated().any():
+        print("       Detected duplicate participant_id values; making them unique for matching...")
+        dup_idx = df.groupby("participant_id").cumcount()
+        mask = dup_idx > 0
+        df.loc[mask, "participant_id"] = (
+            df.loc[mask, "participant_id"] + "-" + dup_idx.loc[mask].astype(str)
+        )
+
     # buddy_preference normalization for ordering (use alias mapping)
     if "buddy_preference" not in df.columns:
         bp_alias = alias_map.get("buddy_preference")
         if bp_alias is not None and bp_alias in df.columns:
             df["buddy_preference"] = df[bp_alias]
+    # Ensure textual context columns exist for LLM prompting using centralized helper
+    df = ensure_standard_fields(df)
     # Ensure required numeric tiers exist (if missing, fill with defaults)
     if "career_stage_level" not in df.columns:
         df["career_stage_level"] = 3  # neutral mid-tier default
@@ -129,13 +155,13 @@ def main() -> None:
         raise
 
     # 4) Save results
-    print(f"[5/5] Saving results to {OUTPUT_CSV}...")
-    OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
-    matches_df.to_csv(OUTPUT_CSV, index=False)
+    print(f"[5/5] Saving results to {output_csv}...")
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    matches_df.to_csv(output_csv, index=False)
 
     # 5) Report summary
     pairs = len(matches_df)
-    print(f"Done. Wrote {pairs} matches to {OUTPUT_CSV}")
+    print(f"Done. Wrote {pairs} matches to {output_csv}")
 
 
 if __name__ == "__main__":

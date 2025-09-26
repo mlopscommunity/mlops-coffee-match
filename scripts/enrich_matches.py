@@ -56,6 +56,8 @@ def normalize_participant_ids(df: pd.DataFrame) -> pd.DataFrame:
     """
     # detect/derive participant_id
     out = df.copy()
+    # Normalize headers (e.g., trailing spaces from Google Sheets exports)
+    out.columns = pd.Index([c.strip() if isinstance(c, str) else c for c in out.columns])
     if "participant_id" in out.columns:
         out["participant_id"] = out["participant_id"].astype(str)
         return out
@@ -103,24 +105,32 @@ def select_readable_fields(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         A projected DataFrame with standardized column names.
     """
-    # choose best-available names for fields
+    # choose best-available names for fields using alias resolution
     out = df.copy()
+    # Normalize headers to handle trailing spaces and minor inconsistencies
+    out.columns = pd.Index([c.strip() if isinstance(c, str) else c for c in out.columns])
     out_cols = {"participant_id": "participant_id"}
-    if "name" in out.columns:
-        out_cols["name"] = "name"
-    elif "synthetic_name" in out.columns:
-        out_cols["synthetic_name"] = "name"
-    for src, dst in [
+
+    alias_map = resolve_aliases(out)
+
+    # Name
+    name_col = alias_map.get("name") or ("synthetic_name" if "synthetic_name" in out.columns else None)
+    if name_col is not None and name_col in out.columns:
+        out_cols[name_col] = "name"
+
+    # Straightforward fields via alias map
+    for key, dst in [
         ("company", "company"),
         ("role", "role"),
-        ("regional_location", "location"),
         ("location", "location"),
         ("career_stage", "career_stage"),
         ("summary", "summary"),
         ("buddy_preferences", "buddy_preferences"),
     ]:
-        if src in out.columns and dst not in out_cols.values():
-            out_cols[src] = dst
+        col = alias_map.get(key)
+        if col is not None and col in out.columns and dst not in out_cols.values():
+            out_cols[col] = dst
+
     return out[list(out_cols.keys())].rename(columns=out_cols)
 
 
@@ -147,6 +157,11 @@ def enrich_matches(matches_df: pd.DataFrame, people_df: pd.DataFrame) -> pd.Data
 
     base = matches_df.copy()
 
+    # Coerce IDs to strings to ensure stable one-to-many joins
+    for col in ["participant_A_id", "participant_B_id"]:
+        if col in base.columns:
+            base[col] = base[col].astype(str)
+
     # Normalize icebreakers to JSON string for CSV stability
     def to_json_list(val: Any) -> str:
         if isinstance(val, list):
@@ -165,6 +180,13 @@ def enrich_matches(matches_df: pd.DataFrame, people_df: pd.DataFrame) -> pd.Data
 
     # Prepare right-side DataFrame for A/B joins
     right = people_df.copy()
+    if "participant_id" not in right.columns:
+        raise KeyError("people_df must include 'participant_id' column")
+
+    # Normalize and de-duplicate participant rows to avoid many-to-many explosions
+    right["participant_id"] = right["participant_id"].astype(str)
+    if right["participant_id"].duplicated().any():
+        right = right.drop_duplicates(subset=["participant_id"], keep="first")
 
     # Join A side
     a_join = base.merge(
