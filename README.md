@@ -171,3 +171,40 @@ uv sync
 source .venv/bin/activate
 export OPENAI_API_KEY=...  # or place in .env
 ```
+
+## Matching pipeline (LLM‑assisted)
+
+End‑to‑end matcher that prepares features, builds a shortlist per seeker, and asks an LLM (structured output) to choose the final buddy with justification, icebreakers, and a generic intro.
+
+### What it does
+- Feature engineering (embeddings, tiers): `matching/feature_engineering.py`
+- Greedy pairing loop: `matching/matcher.py`
+  - Per seeker: filter → cosine similarity → top‑N → LLM choose
+  - Pydantic‑validated structured output (`LLMMatchRecommendation`)
+- Progress logs every 5 pairs (and final pair)
+
+### Run matching
+```bash
+uv run python scripts/run_matching.py
+```
+Defaults read from `scripts/run_matching.py` (edit `INPUT_CSV`/`OUTPUT_CSV`). Optionally set `OPENAI_MODEL=gpt-5-mini`.
+
+### Enrich for human review (CSV + Markdown)
+```bash
+uv run python scripts/enrich_matches.py \
+  --matches data_examples/matches.csv \
+  --participants data_examples/synthetic_participants_20250922_151750.csv \
+  --out-dir data_examples
+```
+Outputs:
+- `data_examples/matches_enriched.csv`: side‑by‑side A/B details plus score/justification/icebreakers/intro
+- `data_examples/matches_report.md`: readable report per pair (sorted by score)
+
+### Prompt & privacy notes
+- The LLM payload excludes PII; when names are not provided, intros are generic (no placeholder names).
+- Structured outputs are parsed via OpenAI Responses API and validated with Pydantic.
+
+### Next steps
+- Optional judge pass + re‑matching for flagged pairs
+- Triad handling for odd counts
+- Metrics/telemetry and unit tests
